@@ -6,6 +6,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include "util.h"
 
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
@@ -24,19 +25,33 @@ static struct cdev *fib_cdev;
 static struct class *fib_class;
 static DEFINE_MUTEX(fib_mutex);
 
-static long long fib_sequence(long long k)
+static long long fib_sequence(long long n)
 {
-    /* FIXME: C99 variable-length array (VLA) is not allowed in Linux kernel. */
-    long long f[k + 2];
-
-    f[0] = 0;
-    f[1] = 1;
-
-    for (int i = 2; i <= k; i++) {
-        f[i] = f[i - 1] + f[i - 2];
+    long long fn = 0ll,  // f(n)
+        fnp1 = 1ll;      // f(n+1) n plus 1
+#ifdef MY_CZ
+    const int lz = clz_long_long(n);
+    const int tz = ctz_long_long(n);
+#else
+    const int lz = __builtin_clzll(n);
+    const int tz = __builtin_ctzll(n);
+#endif           /* MY_CZ */
+    n <<= lz;    // so now there is no leading zeros
+    while (n) {  // exists "1" bit
+        long long f2n = fn * ((fnp1 << 1) - fn), f2np1 = fn * fn + fnp1 * fnp1;
+        if (n & 0x8000000000000000ll) {
+            fn = f2np1, fnp1 = f2np1 + f2n;
+        } else {
+            fn = f2n, fnp1 = f2np1;
+        }
+        n <<= 1;
     }
-
-    return f[k];
+    // speed up for tailing zeros: branchless
+    for (int i = 0; i < tz; ++i) {
+        long long f2n = fn * ((fnp1 << 1) - fn), f2np1 = fn * fn + fnp1 * fnp1;
+        fn = f2n, fnp1 = f2np1;
+    }
+    return fn;
 }
 
 static int fib_open(struct inode *inode, struct file *file)
